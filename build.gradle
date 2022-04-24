@@ -1,0 +1,142 @@
+plugins {
+    id("io.github.gradle-nexus.publish-plugin") version "1.1.0"
+}
+
+allprojects {
+    project.group = "io.honeycomb"
+    def tag = System.getenv("CIRCLE_TAG")
+    if (tag != null && tag.startsWith("v")) {
+        // circle tag means we're publishing a release version
+        project.version = "1.0.0"
+    } else {
+        project.version = "1.0.1-SNAPSHOT"
+    }
+}
+
+tasks.register('project_version') {
+    doLast {
+        println project.version
+    }
+}
+
+subprojects {
+    version = rootProject.version
+
+    apply plugin: "java"
+
+    ext {
+        versions = [
+                opentelemetry         : "1.12.0",
+                opentelemetryJavaagent: "1.12.0",
+                bytebuddy             : "1.10.18",
+        ]
+        versions.opentelemetryAlpha = "${versions.opentelemetry}-alpha"
+        versions.opentelemetryJavaagentAlpha = "${versions.opentelemetryJavaagent}-alpha"
+
+        deps = [
+                bytebuddy     : dependencies.create(group: 'net.bytebuddy', name: 'byte-buddy', version: versions.bytebuddy),
+                bytebuddyagent: dependencies.create(group: 'net.bytebuddy', name: 'byte-buddy-agent', version: versions.bytebuddy),
+        ]
+    }
+
+    repositories {
+        maven {
+            url = uri("https://oss.sonatype.org/content/repositories/snapshots")
+        }
+        mavenCentral()
+    }
+
+    java {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(8)) // compile it to ensure runtime compatibility with Java 8
+        }
+        withJavadocJar()
+        withSourcesJar()
+    }
+    tasks.withType(Jar) {
+        destinationDirectory = file("$rootDir/build-artifacts")
+    }
+
+    plugins.withId("maven-publish") {
+
+        publishing {
+            publications {
+                mavenJava(MavenPublication) {
+                    from components.java
+                    afterEvaluate {
+                        artifactId = project.findProperty("archivesBaseName") as String
+                    }
+                    versionMapping {
+                        usage('java-api') {
+                            fromResolutionOf('runtimeClasspath')
+                        }
+                        usage('java-runtime') {
+                            fromResolutionResult()
+                        }
+                    }
+                    pom {
+                        name = 'Honeycomb OpenTelemetry Distribution for Java'
+                        url = 'https://github.com/honeycombio/honeycomb-opentelemetry-java'
+                        afterEvaluate {
+                            description = project.description
+                        }
+                        licenses {
+                            license {
+                                name = 'The Apache License, Version 2.0'
+                                url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                            }
+                        }
+                        developers {
+                            developer {
+                                id = 'Honeycomb'
+                                name = 'Honeycomb'
+                                email = 'support@honeycomb.io'
+                                organization = 'Honeycomb'
+                                organizationUrl = 'https://honeycomb.io'
+                            }
+                        }
+                        scm {
+                            url = 'https://github.com/honeycombio/honeycomb-opentelemetry-java'
+                            connection = 'scm:git:git@github.com:honeycombio/honeycomb-opentelemetry-java.git'
+                            developerConnection = 'scm:git:git@github.com:honeycombio/honeycomb-opentelemetry-java.git'
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!project.hasProperty("skip.signing")) {
+            plugins.apply("signing")
+
+            signing {
+                def base64key = System.getenv("GPG_BASE64")
+                def pw = System.getenv("GPG_PASSPHRASE")
+                def key = ""
+
+                if (base64key != null) {
+                    key = new String(Base64.getDecoder().decode(base64key)).trim()
+                }
+
+                useInMemoryPgpKeys(key, pw)
+                sign publishing.publications.mavenJava
+            }
+        }
+
+    }
+
+    test {
+        useJUnitPlatform()
+        reports {
+            junitXml.enabled = true
+        }
+    }
+}
+
+nexusPublishing {
+    repositories {
+        sonatype {
+            username.set(System.getenv("OSSRH_USERNAME"))
+            password.set(System.getenv("OSSRH_PASSWORD"))
+        }
+    }
+}

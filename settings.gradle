@@ -1,0 +1,9 @@
+rootProject.name = "honeycomb-opentelemetry-java"
+
+include "agent"
+include "custom"
+include "sdk"
+include "common"
+include "examples:spring-sdk"
+include "examples:spring-agent-manual"
+include "examples:spring-agent-only"
